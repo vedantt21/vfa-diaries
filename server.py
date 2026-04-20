@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parent
-DB_PATH = ROOT / "vfa_diaries.sqlite3"
+DEFAULT_DB_PATH = ROOT / "vfa_diaries.sqlite3"
 STATIC_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
@@ -80,10 +80,23 @@ def verification_expires_at() -> str:
 
 
 def db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    path = database_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def database_path() -> Path:
+    configured_path = os.environ.get("DATABASE_PATH", "").strip()
+    if not configured_path:
+        return DEFAULT_DB_PATH
+
+    path = Path(configured_path).expanduser()
+    if not path.is_absolute():
+        path = ROOT / path
+    return path
 
 
 def init_db() -> None:
@@ -1146,6 +1159,7 @@ def run() -> None:
 
     display_host = "127.0.0.1" if host == "0.0.0.0" else host
     print(f"VFA Diaries running at http://{display_host}:{port}")
+    print(f"Database: {database_path()}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

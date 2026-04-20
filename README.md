@@ -7,7 +7,7 @@ A simple food diary for saving restaurants, cuisine, what you ate, typed ratings
 - Python 3.10 or newer
 - No extra packages required
 
-The app uses Python's built-in web server tools, SQLite, and vendored React files in `vendor/`. The database file is `vfa_diaries.sqlite3`, and each user signs in with their own verified email and password.
+The app uses Python's built-in web server tools, SQLite, and vendored React files in `vendor/`. The default database file is `vfa_diaries.sqlite3`, and each user signs in with their own verified email and password.
 
 After signing in, use the `Diary` tab to browse saved entries and the `Add food` tab to add a new restaurant note.
 
@@ -54,7 +54,9 @@ http://127.0.0.1:8001
 
 ## Data
 
-- Users and diary entries are stored in `vfa_diaries.sqlite3`.
+- Users and diary entries are stored in SQLite.
+- By default, the database file is `vfa_diaries.sqlite3`.
+- Set `DATABASE_PATH` to move the SQLite file onto a persistent disk or volume.
 - Passwords are stored as salted PBKDF2 hashes, not plain text.
 - Email verification codes are stored as salted PBKDF2 hashes and expire after 15 minutes.
 - `.env` and the local SQLite database are ignored by git.
@@ -67,11 +69,28 @@ Before deploying:
 
 - Commit the code, `vendor/` React files, `.env.example`, `Procfile`, and `requirements.txt`.
 - Do not commit `.env` or `vfa_diaries.sqlite3`.
+- Create a persistent disk/volume in your hosting provider.
+- Mount it somewhere stable, for example `/var/data`.
 - In the host dashboard, set `HOST=0.0.0.0`.
 - Set `PORT` only if your host does not set it automatically.
+- Set `DATABASE_PATH=/var/data/vfa_diaries.sqlite3`, changing `/var/data` to your persistent mount path.
 - Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_STARTTLS`, and `SMTP_SSL` as environment variables.
 
-SQLite works for a small single-server deployment. If your host has an ephemeral filesystem, add persistent disk storage or move the database to a managed database before real users rely on it.
+SQLite works for a small single-server deployment with a persistent disk. Keep the app to one running web instance when using SQLite. For multiple app instances or higher traffic, move the data to a managed database such as Postgres.
+
+Production environment example:
+
+```env
+HOST=0.0.0.0
+DATABASE_PATH=/var/data/vfa_diaries.sqlite3
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_STARTTLS=true
+SMTP_SSL=false
+SMTP_USERNAME=your-email@gmail.com
+SMTP_PASSWORD=your-16-character-app-password
+SMTP_FROM=your-email@gmail.com
+```
 
 ## Email Verification
 
