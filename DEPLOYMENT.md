@@ -1,14 +1,53 @@
 # Production Deployment
 
-VFA Diaries can run as a small production app with SQLite as long as the SQLite file lives on persistent storage.
+VFA Diaries is ready for Render. The best free production setup is Render for the Python web service plus Neon for managed Postgres.
 
-## Required Environment Variables
+## Best Free Setup: Render + Neon
 
-Set these in your hosting provider's dashboard:
+Use Neon for the database so your data survives Render restarts and redeploys without paying for a Render persistent disk.
+
+### 1. Create The Neon Database
+
+1. Open Neon and create a project.
+2. Click `Connect` in the project dashboard.
+3. Copy the Postgres connection string.
+4. Make sure the string includes SSL, usually `sslmode=require`.
+
+It should look like this:
+
+```text
+postgresql://user:password@host/database?sslmode=require
+```
+
+You do not need the `npx neonctl@latest init` flow for this app.
+
+### 2. Create The Render Web Service
+
+In Render:
+
+1. Click `New` then `Web Service`.
+2. Connect `https://github.com/vedantt21/vfa-diaries`.
+3. Choose the Python runtime.
+4. Set the build command:
+
+```bash
+pip install -r requirements.txt
+```
+
+5. Set the start command:
+
+```bash
+python3 server.py
+```
+
+Render automatically provides `RENDER=true` and `PORT`. The server uses those to bind to `0.0.0.0`, which is required for Render to detect the app.
+
+### 3. Add Render Environment Variables
+
+Set these in the Render service's `Environment` page:
 
 ```env
-HOST=0.0.0.0
-DATABASE_PATH=/var/data/vfa_diaries.sqlite3
+DATABASE_URL=postgresql://user:password@host/database?sslmode=require
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_STARTTLS=true
@@ -18,33 +57,35 @@ SMTP_PASSWORD=your-16-character-app-password
 SMTP_FROM=your-email@gmail.com
 ```
 
-Do not set `PORT` unless your hosting provider asks you to. Most providers set it automatically.
+Do not paste your local `.env` into git. Add those values in Render's dashboard only.
 
-## Persistent Database Storage
+## What The Render Error Meant
 
-1. Create a persistent disk, volume, or storage mount in your host.
-2. Mount it at a stable path, such as `/var/data`.
-3. Set `DATABASE_PATH` to a file inside that mount:
+This log:
+
+```text
+Unsupported method ('HEAD')
+No open ports detected on 0.0.0.0
+```
+
+meant two things:
+
+- Render sent `HEAD /` as a health check, but the server only handled `GET`.
+- The server was listening on `127.0.0.1`, which is private inside the container. Render needs the app to listen on `0.0.0.0`.
+
+Both are fixed in `server.py`.
+
+## Alternative: SQLite With A Persistent Disk
+
+SQLite is okay for one small web instance, but the SQLite file must live on persistent storage. Render persistent disks are not part of the free web service setup, so Neon is usually better here.
+
+If you use a paid persistent disk, set:
 
 ```env
 DATABASE_PATH=/var/data/vfa_diaries.sqlite3
 ```
 
-The app creates the parent directory if needed and initializes the SQLite database automatically.
-
-## Runtime Command
-
-Hosts that support `Procfile` should use:
-
-```text
-web: HOST=0.0.0.0 python3 server.py
-```
-
-That command is already in `Procfile`.
-
-## SQLite Production Limits
-
-SQLite is fine for one small web instance and a persistent disk. Do not run multiple app instances against the same SQLite file. If you need multiple instances or higher traffic, move the data to managed Postgres.
+Do not set `DATABASE_URL` in that setup.
 
 ## Keep Out Of Git
 

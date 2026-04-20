@@ -1,1 +1,1 @@
-web: HOST=0.0.0.0 python3 server.py
+web: python3 server.py

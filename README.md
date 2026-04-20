@@ -5,9 +5,9 @@ A simple food diary for saving restaurants, cuisine, what you ate, typed ratings
 ## Requirements
 
 - Python 3.10 or newer
-- No extra packages required
+- Python packages from `requirements.txt`
 
-The app uses Python's built-in web server tools, SQLite, and vendored React files in `vendor/`. The default database file is `vfa_diaries.sqlite3`, and each user signs in with their own verified email and password.
+The app uses Python's built-in web server tools, SQLite for local development, optional Neon/Postgres for production, and vendored React files in `vendor/`. The default local database file is `vfa_diaries.sqlite3`, and each user signs in with their own verified email and password.
 
 After signing in, use the `Diary` tab to browse saved entries and the `Add food` tab to add a new restaurant note.
 
@@ -16,6 +16,7 @@ After signing in, use the `Diary` tab to browse saved entries and the `Add food`
 From this folder:
 
 ```bash
+pip install -r requirements.txt
 python3 server.py
 ```
 
@@ -54,35 +55,34 @@ http://127.0.0.1:8001
 
 ## Data
 
-- Users and diary entries are stored in SQLite.
-- By default, the database file is `vfa_diaries.sqlite3`.
+- Users and diary entries are stored in SQLite locally, or Postgres when `DATABASE_URL` is set.
+- By default, the local database file is `vfa_diaries.sqlite3`.
 - Set `DATABASE_PATH` to move the SQLite file onto a persistent disk or volume.
+- Set `DATABASE_URL` to use Neon/Postgres instead of SQLite.
 - Passwords are stored as salted PBKDF2 hashes, not plain text.
 - Email verification codes are stored as salted PBKDF2 hashes and expire after 15 minutes.
 - `.env` and the local SQLite database are ignored by git.
 
 ## Deploy
 
-This project is ready for simple Python app hosts that support a `Procfile`.
+For the easiest free production setup, use Render for the web app and Neon for the Postgres database.
 
-Before deploying:
+### Render + Neon
 
-- Commit the code, `vendor/` React files, `.env.example`, `Procfile`, and `requirements.txt`.
-- Do not commit `.env` or `vfa_diaries.sqlite3`.
-- Create a persistent disk/volume in your hosting provider.
-- Mount it somewhere stable, for example `/var/data`.
-- In the host dashboard, set `HOST=0.0.0.0`.
-- Set `PORT` only if your host does not set it automatically.
-- Set `DATABASE_PATH=/var/data/vfa_diaries.sqlite3`, changing `/var/data` to your persistent mount path.
-- Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_STARTTLS`, and `SMTP_SSL` as environment variables.
+1. In Neon, create a project and click `Connect`.
+2. Copy the Postgres connection string. It should look like `postgresql://...neon.tech/...?...sslmode=require`.
+3. In Render, create a Python web service from this repo.
+4. Use build command `pip install -r requirements.txt`.
+5. Use start command `python3 server.py`.
+6. In Render's environment variables, add `DATABASE_URL` with the Neon connection string.
+7. Also add the SMTP variables from your local `.env`.
 
-SQLite works for a small single-server deployment with a persistent disk. Keep the app to one running web instance when using SQLite. For multiple app instances or higher traffic, move the data to a managed database such as Postgres.
+Render sets `RENDER=true` and `PORT` automatically, so the server binds to `0.0.0.0` on Render. If you set `DATABASE_URL`, the app creates the Postgres tables automatically on startup.
 
 Production environment example:
 
 ```env
-HOST=0.0.0.0
-DATABASE_PATH=/var/data/vfa_diaries.sqlite3
+DATABASE_URL=postgresql://user:password@host/database?sslmode=require
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_STARTTLS=true
@@ -91,6 +91,8 @@ SMTP_USERNAME=your-email@gmail.com
 SMTP_PASSWORD=your-16-character-app-password
 SMTP_FROM=your-email@gmail.com
 ```
+
+SQLite also works for one small web instance if your host provides a persistent disk. In that setup, set `DATABASE_PATH=/var/data/vfa_diaries.sqlite3` instead of `DATABASE_URL`.
 
 ## Email Verification
 
