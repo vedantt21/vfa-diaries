@@ -37,3 +37,4 @@ build/
 coverage/
 screenshots/
 *.png
+!logo.png

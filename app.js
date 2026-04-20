@@ -2,6 +2,7 @@ const { useEffect, useMemo, useState } = React;
 const e = React.createElement;
 
 const DEFAULT_RATING = 8;
+const LOGO_SRC = "logo.png";
 
 function App() {
   const [session, setSessionState] = useState(() =>
@@ -369,7 +370,11 @@ function AuthScreen(props) {
     e(
       "div",
       { className: "auth-copy" },
-      e("div", { className: "auth-symbol", "aria-hidden": "true" }, "🍽️"),
+      e(
+        "div",
+        { className: "auth-logo-frame" },
+        e("img", { className: "auth-logo", src: LOGO_SRC, alt: "VFA Diaries logo" }),
+      ),
       e(
         "div",
         null,
@@ -543,6 +548,12 @@ function MainApp(props) {
       e(
         "div",
         { className: "brand" },
+        e("img", {
+          className: "brand-logo",
+          src: LOGO_SRC,
+          alt: "",
+          "aria-hidden": "true",
+        }),
         e(
           "div",
           null,
@@ -727,7 +738,12 @@ function DiaryPanel({
         ? e(
             "div",
             { className: "empty-state visible" },
-            e("span", { className: "empty-symbol", "aria-hidden": "true" }, "+"),
+            e("img", {
+              className: "empty-logo",
+              src: LOGO_SRC,
+              alt: "",
+              "aria-hidden": "true",
+            }),
             e(
               "div",
               null,
@@ -740,7 +756,12 @@ function DiaryPanel({
           ? e(
               "div",
               { className: "empty-state visible" },
-              e("span", { className: "empty-symbol", "aria-hidden": "true" }, "?"),
+              e("img", {
+                className: "empty-logo",
+                src: LOGO_SRC,
+                alt: "",
+                "aria-hidden": "true",
+              }),
               e(
                 "div",
                 null,

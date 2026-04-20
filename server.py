@@ -26,6 +26,7 @@ STATIC_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
+    ".png": "image/png",
 }
 MAX_REQUEST_BYTES = 256 * 1024
 PASSWORD_ITERATIONS = 210_000
