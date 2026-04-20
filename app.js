@@ -586,38 +586,15 @@ function MainApp(props) {
         { className: "app-tabs", "aria-label": "Diary sections" },
         e(TabButton, { active: props.appTab === "diary", onClick: () => props.setAppTab("diary") }, "Diary"),
         e(TabButton, { active: props.appTab === "add", onClick: () => props.setAppTab("add") }, "Add food"),
-      ),
-      e(StatsBar, { stats: props.stats }),
-    ),
-    props.appTab === "diary"
-      ? e(DiaryPanel, props)
-      : e(AddFoodPanel, { status: props.status, onSaveEntry: props.onSaveEntry }),
-  );
-}
-
-function StatsBar({ stats }) {
-  const items = [
-    ["Dishes", String(stats.dishCount)],
-    ["Places", String(stats.restaurantCount)],
-    ["Total spent", stats.pricedCount ? formatMoney(stats.totalSpent) : "$0.00"],
-    ["Avg spent", stats.pricedCount ? formatMoney(stats.averageSpent) : "--"],
-    ["Avg rating", stats.dishCount ? `${formatRating(stats.averageRating)} / 10` : "--"],
-    ["Buy again", stats.dishCount ? `${Math.round(stats.buyAgainRate * 100)}%` : "--"],
-    ["Top cuisine", stats.topCuisine || "--"],
-    ["Best bite", stats.bestDish || "--"],
-  ];
-
-  return e(
-    "aside",
-    { className: "stats-bar", "aria-label": "Diary stats" },
-    items.map(([label, value]) =>
-      e(
-        "div",
-        { className: "stat-pill", key: label },
-        e("span", null, label),
-        e("strong", { title: value }, value),
+        e(TabButton, { active: props.appTab === "stats", onClick: () => props.setAppTab("stats") }, "Stats"),
       ),
     ),
+    props.appTab === "diary" &&
+      e(DiaryPanel, props),
+    props.appTab === "add" &&
+      e(AddFoodPanel, { status: props.status, onSaveEntry: props.onSaveEntry }),
+    props.appTab === "stats" &&
+      e(StatsPanel, { stats: props.stats, setAppTab: props.setAppTab }),
   );
 }
 
@@ -631,6 +608,186 @@ function TabButton({ active, onClick, children }) {
       "aria-selected": String(active),
     },
     children,
+  );
+}
+
+function StatsPanel({ stats, setAppTab }) {
+  if (!stats.dishCount) {
+    return e(
+      "section",
+      { className: "app-panel active", "aria-label": "Diary stats" },
+      e(
+        "div",
+        { className: "stats-page" },
+        e("h2", null, "Stats"),
+        e(
+          "div",
+          { className: "empty-state visible" },
+          e("img", {
+            className: "empty-logo",
+            src: LOGO_SRC,
+            alt: "",
+            "aria-hidden": "true",
+          }),
+          e(
+            "div",
+            null,
+            e("h3", null, "No stats yet."),
+            e("p", null, "Add a food note and this page will start filling up."),
+            e("button", { className: "button secondary", type: "button", onClick: () => setAppTab("add") }, "Add food"),
+          ),
+        ),
+      ),
+    );
+  }
+
+  return e(
+    "section",
+    { className: "app-panel active", "aria-label": "Diary stats" },
+    e(
+      "div",
+      { className: "stats-page" },
+      e("h2", null, "Stats"),
+      e("p", null, "A quick read on where your best bites and food money are going."),
+      e(
+        "div",
+        { className: "stats-summary" },
+        e(StatCard, {
+          label: "Logged",
+          value: `${stats.dishCount} ${stats.dishCount === 1 ? "dish" : "dishes"}`,
+          detail: `${stats.restaurantCount} ${stats.restaurantCount === 1 ? "place" : "places"}, ${stats.uniqueCuisines} ${stats.uniqueCuisines === 1 ? "cuisine" : "cuisines"}`,
+        }),
+        e(StatCard, {
+          label: "Spent",
+          value: stats.pricedCount ? formatMoney(stats.totalSpent) : "--",
+          detail: stats.pricedCount
+            ? `${formatMoney(stats.averageSpent)} average`
+            : "Add prices to unlock spend",
+        }),
+        e(StatCard, {
+          label: "Average rating",
+          value: `${formatRating(stats.averageRating)} / 10`,
+          detail: `${stats.perfectCount} ${stats.perfectCount === 1 ? "dish" : "dishes"} at 9+`,
+        }),
+        e(StatCard, {
+          label: "Buy again",
+          value: `${Math.round(stats.buyAgainRate * 100)}%`,
+          detail: `${stats.repeatRestaurantCount} repeat ${stats.repeatRestaurantCount === 1 ? "spot" : "spots"}`,
+        }),
+      ),
+      e(
+        "div",
+        { className: "stats-highlights" },
+        e(StatCard, {
+          label: "Best bite",
+          value: entryTitle(stats.bestEntry),
+          detail: stats.bestEntry ? `${formatRating(stats.bestEntry.rating)} / 10` : "--",
+        }),
+        e(StatCard, {
+          label: "Favorite spot",
+          value: stats.topRestaurant?.label || "--",
+          detail: stats.topRestaurant
+            ? `${stats.topRestaurant.count} ${stats.topRestaurant.count === 1 ? "visit" : "visits"}`
+            : "--",
+        }),
+        e(StatCard, {
+          label: "Top cuisine",
+          value: stats.topCuisine?.label || "--",
+          detail: stats.topCuisine ? `${stats.topCuisine.count} logged` : "--",
+        }),
+        e(StatCard, {
+          label: "Best value",
+          value: entryTitle(stats.bestValueEntry),
+          detail: stats.bestValueEntry
+            ? `${formatRating(stats.bestValueEntry.rating)} / 10 for ${formatMoney(stats.bestValueEntry.price)}`
+            : "Add prices to find it",
+        }),
+        e(StatCard, {
+          label: "Spendiest bite",
+          value: entryTitle(stats.spendiestEntry),
+          detail: stats.spendiestEntry ? formatMoney(stats.spendiestEntry.price) : "Add prices to find it",
+        }),
+        e(StatCard, {
+          label: "Current mood",
+          value: stats.moodLabel,
+          detail: `${stats.lowRatedCount} tough ${stats.lowRatedCount === 1 ? "call" : "calls"}`,
+        }),
+      ),
+      e(
+        "div",
+        { className: "stats-breakdowns" },
+        e(BreakdownPanel, {
+          title: "Top cuisines",
+          items: stats.cuisineBreakdown,
+          emptyText: "Add cuisine tags to see your taste map.",
+        }),
+        e(BreakdownPanel, {
+          title: "Favorite spots",
+          items: stats.restaurantBreakdown,
+          emptyText: "Add restaurants to see your regulars.",
+        }),
+        e(BreakdownPanel, {
+          title: "Rating mix",
+          items: stats.ratingBuckets,
+          emptyText: "Rate dishes to see the spread.",
+        }),
+        e(BreakdownPanel, {
+          title: "Spend by cuisine",
+          items: stats.spendByCuisine,
+          valueType: "money",
+          emptyText: "Add prices and cuisines to see spend by taste.",
+        }),
+      ),
+    ),
+  );
+}
+
+function StatCard({ label, value, detail }) {
+  return e(
+    "article",
+    { className: "stat-card" },
+    e("span", null, label),
+    e("strong", { title: value }, value),
+    e("p", null, detail),
+  );
+}
+
+function BreakdownPanel({ title, items, valueType = "count", emptyText }) {
+  const maxValue = Math.max(
+    1,
+    ...items.map((item) => (valueType === "money" ? item.total : item.count)),
+  );
+
+  return e(
+    "section",
+    { className: "stats-panel" },
+    e("h3", null, title),
+    items.length
+      ? e(
+          "div",
+          { className: "rank-list" },
+          items.map((item) => {
+            const amount = valueType === "money" ? item.total : item.count;
+            const value = valueType === "money" ? formatMoney(item.total) : String(item.count);
+            return e(
+              "div",
+              { className: "rank-row", key: item.label },
+              e(
+                "div",
+                { className: "rank-line" },
+                e("span", { title: item.label }, item.label),
+                e("strong", null, value),
+              ),
+              e(
+                "div",
+                { className: "rank-track", "aria-hidden": "true" },
+                e("span", { style: { width: `${amount ? Math.max(4, (amount / maxValue) * 100) : 0}%` } }),
+              ),
+              item.detail && e("p", null, item.detail),
+            );
+          }),
+        )
+      : e("p", { className: "stats-empty" }, emptyText),
   );
 }
 
@@ -1049,24 +1206,41 @@ function formatMoney(value) {
 
 function buildStats(entries) {
   const dishCount = entries.length;
-  const restaurants = new Set();
+  const restaurantCounts = new Map();
+  const restaurantLabels = new Map();
   const cuisineCounts = new Map();
+  const cuisineLabels = new Map();
+  const cuisineSpend = new Map();
   let totalSpent = 0;
   let pricedCount = 0;
   let ratingTotal = 0;
   let buyAgainCount = 0;
-  let bestDish = "";
-  let bestRating = -1;
+  let bestEntry = null;
+  let spendiestEntry = null;
+  let bestValueEntry = null;
+  let bestValueScore = -1;
+  let perfectCount = 0;
+  let lowRatedCount = 0;
+  const ratingBuckets = [
+    { label: "9-10", count: 0, detail: "great calls" },
+    { label: "7-8.99", count: 0, detail: "solid picks" },
+    { label: "5-6.99", count: 0, detail: "fine, not magic" },
+    { label: "0-4.99", count: 0, detail: "rough ones" },
+  ];
 
   entries.forEach((entry) => {
-    const restaurant = String(entry.restaurant || "").trim().toLowerCase();
-    if (restaurant) {
-      restaurants.add(restaurant);
+    const restaurantLabel = String(entry.restaurant || "").trim();
+    const restaurantKey = restaurantLabel.toLowerCase();
+    if (restaurantKey) {
+      restaurantLabels.set(restaurantKey, restaurantLabels.get(restaurantKey) || restaurantLabel);
+      incrementCount(restaurantCounts, restaurantKey);
     }
 
-    const cuisine = String(entry.cuisine || "").trim();
-    if (cuisine) {
-      cuisineCounts.set(cuisine, (cuisineCounts.get(cuisine) || 0) + 1);
+    const cuisineLabel = String(entry.cuisine || "").trim();
+    const cuisineKey = cuisineLabel.toLowerCase();
+    if (cuisineKey) {
+      cuisineLabels.set(cuisineKey, cuisineLabels.get(cuisineKey) || cuisineLabel);
+      incrementCount(cuisineCounts, cuisineKey);
     }
 
     if (entry.price !== null && entry.price !== undefined && entry.price !== "") {
@@ -1074,14 +1248,41 @@ function buildStats(entries) {
       if (Number.isFinite(price)) {
         totalSpent += price;
         pricedCount += 1;
+        if (cuisineKey) {
+          cuisineSpend.set(cuisineKey, (cuisineSpend.get(cuisineKey) || 0) + price);
+        }
+        if (!spendiestEntry || price > Number(spendiestEntry.price)) {
+          spendiestEntry = entry;
+        }
+
+        const rating = Number(entry.rating) || 0;
+        const valueScore = price > 0 ? rating / price : rating * 100;
+        if (rating >= 7 && valueScore > bestValueScore) {
+          bestValueScore = valueScore;
+          bestValueEntry = entry;
+        }
       }
     }
 
     const rating = Number(entry.rating) || 0;
     ratingTotal += rating;
-    if (rating > bestRating) {
-      bestRating = rating;
-      bestDish = entry.dish || "";
+    if (!bestEntry || rating > Number(bestEntry.rating || 0)) {
+      bestEntry = entry;
+    }
+    if (rating >= 9) {
+      perfectCount += 1;
+    }
+    if (rating < 7) {
+      lowRatedCount += 1;
+    }
+    if (rating >= 9) {
+      ratingBuckets[0].count += 1;
+    } else if (rating >= 7) {
+      ratingBuckets[1].count += 1;
+    } else if (rating >= 5) {
+      ratingBuckets[2].count += 1;
+    } else {
+      ratingBuckets[3].count += 1;
     }
 
     if (entry.wouldBuyAgain) {
@@ -1089,29 +1290,78 @@ function buildStats(entries) {
     }
   });
 
+  const averageRating = dishCount ? ratingTotal / dishCount : 0;
+  const buyAgainRate = dishCount ? buyAgainCount / dishCount : 0;
+  const restaurantBreakdown = rankedCounts(restaurantCounts, restaurantLabels);
+  const cuisineBreakdown = rankedCounts(cuisineCounts, cuisineLabels);
+  const spendByCuisine = rankedMoney(cuisineSpend, cuisineLabels);
+  const repeatRestaurantCount = restaurantBreakdown.filter((item) => item.count > 1).length;
+
   return {
     dishCount,
-    restaurantCount: restaurants.size,
+    restaurantCount: restaurantCounts.size,
+    uniqueCuisines: cuisineCounts.size,
     pricedCount,
     totalSpent,
     averageSpent: pricedCount ? totalSpent / pricedCount : 0,
-    averageRating: dishCount ? ratingTotal / dishCount : 0,
-    buyAgainRate: dishCount ? buyAgainCount / dishCount : 0,
-    topCuisine: topCountedValue(cuisineCounts),
-    bestDish,
+    averageRating,
+    buyAgainRate,
+    repeatRestaurantCount,
+    perfectCount,
+    lowRatedCount,
+    topCuisine: cuisineBreakdown[0] || null,
+    topRestaurant: restaurantBreakdown[0] || null,
+    bestEntry,
+    spendiestEntry,
+    bestValueEntry,
+    cuisineBreakdown: cuisineBreakdown.slice(0, 6),
+    restaurantBreakdown: restaurantBreakdown.slice(0, 6),
+    spendByCuisine: spendByCuisine.slice(0, 6),
+    ratingBuckets,
+    moodLabel: foodMood(averageRating, buyAgainRate),
   };
 }
 
-function topCountedValue(counts) {
-  let topValue = "";
-  let topCount = 0;
-  counts.forEach((count, value) => {
-    if (count > topCount) {
-      topValue = value;
-      topCount = count;
-    }
-  });
-  return topValue;
+function incrementCount(counts, key) {
+  counts.set(key, (counts.get(key) || 0) + 1);
+}
+
+function rankedCounts(counts, labels) {
+  return Array.from(counts, ([key, count]) => ({
+    label: labels.get(key) || key,
+    count,
+    detail: `${count} ${count === 1 ? "entry" : "entries"}`,
+  })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
+function rankedMoney(amounts, labels) {
+  return Array.from(amounts, ([key, total]) => ({
+    label: labels.get(key) || key,
+    total,
+    detail: "tracked spend",
+  })).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
+}
+
+function entryTitle(entry) {
+  if (!entry) {
+    return "--";
+  }
+  const dish = entry.dish || "Untitled dish";
+  const restaurant = entry.restaurant || "Unknown spot";
+  return `${dish} at ${restaurant}`;
+}
+
+function foodMood(averageRating, buyAgainRate) {
+  if (averageRating >= 8.8 && buyAgainRate >= 0.75) {
+    return "Hot streak";
+  }
+  if (averageRating >= 7.5) {
+    return "Eating well";
+  }
+  if (buyAgainRate < 0.4) {
+    return "Picky era";
+  }
+  return "Still exploring";
 }
 
 function verificationDeliveryText(email, deliveryMode) {
