@@ -74,6 +74,8 @@ function App() {
     });
   }, [entries, search, filterCuisine, filterMinRating, filterMaxRating, filterBuyAgain]);
 
+  const stats = useMemo(() => buildStats(entries), [entries]);
+
   function authHeaders() {
     return session?.token ? { Authorization: `Bearer ${session.token}` } : {};
   }
@@ -347,6 +349,7 @@ function App() {
     entryCount: visibleEntries.length,
     entries: visibleEntries,
     hasAnyEntries: entries.length > 0,
+    stats,
     status,
     onLogout: logout,
     onSaveEntry: saveEntry,
@@ -576,14 +579,45 @@ function MainApp(props) {
       ),
     ),
     e(
-      "nav",
-      { className: "app-tabs", "aria-label": "Diary sections" },
-      e(TabButton, { active: props.appTab === "diary", onClick: () => props.setAppTab("diary") }, "Diary"),
-      e(TabButton, { active: props.appTab === "add", onClick: () => props.setAppTab("add") }, "Add food"),
+      "div",
+      { className: "nav-row" },
+      e(
+        "nav",
+        { className: "app-tabs", "aria-label": "Diary sections" },
+        e(TabButton, { active: props.appTab === "diary", onClick: () => props.setAppTab("diary") }, "Diary"),
+        e(TabButton, { active: props.appTab === "add", onClick: () => props.setAppTab("add") }, "Add food"),
+      ),
+      e(StatsBar, { stats: props.stats }),
     ),
     props.appTab === "diary"
       ? e(DiaryPanel, props)
       : e(AddFoodPanel, { status: props.status, onSaveEntry: props.onSaveEntry }),
+  );
+}
+
+function StatsBar({ stats }) {
+  const items = [
+    ["Dishes", String(stats.dishCount)],
+    ["Places", String(stats.restaurantCount)],
+    ["Total spent", stats.pricedCount ? formatMoney(stats.totalSpent) : "$0.00"],
+    ["Avg spent", stats.pricedCount ? formatMoney(stats.averageSpent) : "--"],
+    ["Avg rating", stats.dishCount ? `${formatRating(stats.averageRating)} / 10` : "--"],
+    ["Buy again", stats.dishCount ? `${Math.round(stats.buyAgainRate * 100)}%` : "--"],
+    ["Top cuisine", stats.topCuisine || "--"],
+    ["Best bite", stats.bestDish || "--"],
+  ];
+
+  return e(
+    "aside",
+    { className: "stats-bar", "aria-label": "Diary stats" },
+    items.map(([label, value]) =>
+      e(
+        "div",
+        { className: "stat-pill", key: label },
+        e("span", null, label),
+        e("strong", { title: value }, value),
+      ),
+    ),
   );
 }
 
@@ -812,7 +846,9 @@ function FoodCard({ entry, isExpanded, onToggle, onDeleteEntry }) {
         { className: "entry-meta" },
         entry.cuisine && e("span", { className: "meta-item" }, entry.cuisine),
         e("span", { className: "meta-item" }, `${entry.rating}/10`),
-        entry.price && e("span", { className: "meta-item" }, `$${entry.price.toFixed(2)}`),
+        entry.price !== null &&
+          entry.price !== undefined &&
+          e("span", { className: "meta-item" }, formatMoney(entry.price)),
         e("span", { className: "meta-item" }, entry.wouldBuyAgain ? "Would buy" : "Won't buy"),
       ),
       isExpanded && entry.comments && e("p", { className: "entry-comments" }, entry.comments),
@@ -1001,6 +1037,81 @@ function clampRating(value) {
 
 function formatRating(value) {
   return Number(value).toFixed(2).replace(/\.?0+$/, "");
+}
+
+function formatMoney(value) {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(Number(value) || 0);
+}
+
+function buildStats(entries) {
+  const dishCount = entries.length;
+  const restaurants = new Set();
+  const cuisineCounts = new Map();
+  let totalSpent = 0;
+  let pricedCount = 0;
+  let ratingTotal = 0;
+  let buyAgainCount = 0;
+  let bestDish = "";
+  let bestRating = -1;
+
+  entries.forEach((entry) => {
+    const restaurant = String(entry.restaurant || "").trim().toLowerCase();
+    if (restaurant) {
+      restaurants.add(restaurant);
+    }
+
+    const cuisine = String(entry.cuisine || "").trim();
+    if (cuisine) {
+      cuisineCounts.set(cuisine, (cuisineCounts.get(cuisine) || 0) + 1);
+    }
+
+    if (entry.price !== null && entry.price !== undefined && entry.price !== "") {
+      const price = Number(entry.price);
+      if (Number.isFinite(price)) {
+        totalSpent += price;
+        pricedCount += 1;
+      }
+    }
+
+    const rating = Number(entry.rating) || 0;
+    ratingTotal += rating;
+    if (rating > bestRating) {
+      bestRating = rating;
+      bestDish = entry.dish || "";
+    }
+
+    if (entry.wouldBuyAgain) {
+      buyAgainCount += 1;
+    }
+  });
+
+  return {
+    dishCount,
+    restaurantCount: restaurants.size,
+    pricedCount,
+    totalSpent,
+    averageSpent: pricedCount ? totalSpent / pricedCount : 0,
+    averageRating: dishCount ? ratingTotal / dishCount : 0,
+    buyAgainRate: dishCount ? buyAgainCount / dishCount : 0,
+    topCuisine: topCountedValue(cuisineCounts),
+    bestDish,
+  };
+}
+
+function topCountedValue(counts) {
+  let topValue = "";
+  let topCount = 0;
+  counts.forEach((count, value) => {
+    if (count > topCount) {
+      topValue = value;
+      topCount = count;
+    }
+  });
+  return topValue;
 }
 
 function verificationDeliveryText(email, deliveryMode) {
