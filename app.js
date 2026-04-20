@@ -3,6 +3,20 @@ const e = React.createElement;
 
 const DEFAULT_RATING = 8;
 const LOGO_SRC = "logo.png";
+const COMMON_CUISINES = [
+  "Indian",
+  "Lebanese",
+  "Pub",
+  "Cafe",
+  "Chinese",
+  "Thai",
+  "Italian",
+  "Japanese",
+  "Mexican",
+  "Korean",
+  "Mediterranean",
+  "Greek",
+];
 
 function App() {
   const [session, setSessionState] = useState(() =>
@@ -41,7 +55,7 @@ function App() {
     return entries.filter((entry) => {
       // Search filter
       if (query) {
-        const haystack = [entry.dish, entry.restaurant]
+        const haystack = [entry.dish, entry.restaurant, entry.suburb, entry.cuisine]
           .join(" ")
           .toLowerCase();
         if (!haystack.includes(query)) {
@@ -75,6 +89,7 @@ function App() {
   }, [entries, search, filterCuisine, filterMinRating, filterMaxRating, filterBuyAgain]);
 
   const stats = useMemo(() => buildStats(entries), [entries]);
+  const suggestions = useMemo(() => buildSuggestionLists(entries), [entries]);
 
   function authHeaders() {
     return session?.token ? { Authorization: `Bearer ${session.token}` } : {};
@@ -350,6 +365,7 @@ function App() {
     entries: visibleEntries,
     hasAnyEntries: entries.length > 0,
     stats,
+    suggestions,
     status,
     onLogout: logout,
     onSaveEntry: saveEntry,
@@ -592,7 +608,11 @@ function MainApp(props) {
     props.appTab === "diary" &&
       e(DiaryPanel, props),
     props.appTab === "add" &&
-      e(AddFoodPanel, { status: props.status, onSaveEntry: props.onSaveEntry }),
+      e(AddFoodPanel, {
+        status: props.status,
+        onSaveEntry: props.onSaveEntry,
+        suggestions: props.suggestions,
+      }),
     props.appTab === "stats" &&
       e(StatsPanel, { stats: props.stats, setAppTab: props.setAppTab }),
   );
@@ -655,7 +675,7 @@ function StatsPanel({ stats, setAppTab }) {
         e(StatCard, {
           label: "Logged",
           value: `${stats.dishCount} ${stats.dishCount === 1 ? "dish" : "dishes"}`,
-          detail: `${stats.restaurantCount} ${stats.restaurantCount === 1 ? "place" : "places"}, ${stats.uniqueCuisines} ${stats.uniqueCuisines === 1 ? "cuisine" : "cuisines"}`,
+          detail: `${stats.restaurantCount} ${stats.restaurantCount === 1 ? "place" : "places"}, ${stats.uniqueSuburbs} ${stats.uniqueSuburbs === 1 ? "suburb" : "suburbs"}`,
         }),
         e(StatCard, {
           label: "Spent",
@@ -696,6 +716,11 @@ function StatsPanel({ stats, setAppTab }) {
           detail: stats.topCuisine ? `${stats.topCuisine.count} logged` : "--",
         }),
         e(StatCard, {
+          label: "Top suburb",
+          value: stats.topSuburb?.label || "--",
+          detail: stats.topSuburb ? `${stats.topSuburb.count} logged` : "--",
+        }),
+        e(StatCard, {
           label: "Best value",
           value: entryTitle(stats.bestValueEntry),
           detail: stats.bestValueEntry
@@ -725,6 +750,11 @@ function StatsPanel({ stats, setAppTab }) {
           title: "Favorite spots",
           items: stats.restaurantBreakdown,
           emptyText: "Add restaurants to see your regulars.",
+        }),
+        e(BreakdownPanel, {
+          title: "Top suburbs",
+          items: stats.suburbBreakdown,
+          emptyText: "Add suburbs to see your food map.",
         }),
         e(BreakdownPanel, {
           title: "Rating mix",
@@ -807,6 +837,7 @@ function DiaryPanel({
   setFilterMaxRating,
   filterBuyAgain,
   setFilterBuyAgain,
+  suggestions,
 }) {
   const [expandedId, setExpandedId] = useState(null);
   return e(
@@ -847,18 +878,9 @@ function DiaryPanel({
               className: "filter-input",
             },
             e("option", { value: "" }, "All cuisines"),
-            e("option", { value: "Indian" }, "Indian"),
-            e("option", { value: "Lebanese" }, "Lebanese"),
-            e("option", { value: "Pub" }, "Pub"),
-            e("option", { value: "Cafe" }, "Cafe"),
-            e("option", { value: "Chinese" }, "Chinese"),
-            e("option", { value: "Thai" }, "Thai"),
-            e("option", { value: "Italian" }, "Italian"),
-            e("option", { value: "Japanese" }, "Japanese"),
-            e("option", { value: "Mexican" }, "Mexican"),
-            e("option", { value: "Korean" }, "Korean"),
-            e("option", { value: "Mediterranean" }, "Mediterranean"),
-            e("option", { value: "Greek" }, "Greek"),
+            suggestions.cuisines.map((cuisine) =>
+              e("option", { key: cuisine, value: cuisine }, cuisine),
+            ),
           ),
         ),
         e(
@@ -1001,6 +1023,7 @@ function FoodCard({ entry, isExpanded, onToggle, onDeleteEntry }) {
       e(
         "div",
         { className: "entry-meta" },
+        entry.suburb && e("span", { className: "meta-item" }, entry.suburb),
         entry.cuisine && e("span", { className: "meta-item" }, entry.cuisine),
         e("span", { className: "meta-item" }, `${entry.rating}/10`),
         entry.price !== null &&
@@ -1026,7 +1049,7 @@ function FoodCard({ entry, isExpanded, onToggle, onDeleteEntry }) {
   );
 }
 
-function AddFoodPanel({ status, onSaveEntry }) {
+function AddFoodPanel({ status, onSaveEntry, suggestions }) {
   const [rating, setRating] = useState(DEFAULT_RATING);
 
   async function submit(event) {
@@ -1051,44 +1074,44 @@ function AddFoodPanel({ status, onSaveEntry }) {
       e(
         "form",
         { className: "form-stack", onSubmit: submit },
+        e(Datalist, { id: "restaurant-options", options: suggestions.restaurants }),
+        e(Datalist, { id: "suburb-options", options: suggestions.suburbs }),
+        e(Datalist, { id: "dish-options", options: suggestions.dishes }),
+        e(Datalist, { id: "cuisine-options", options: suggestions.cuisines }),
         e(FormField, {
           className: "question-block",
           label: "Restaurant",
           name: "restaurant",
+          list: "restaurant-options",
           placeholder: "Where did you go?",
           maxLength: 120,
           required: true,
         }),
         e(FormField, {
           className: "question-block",
+          label: "Suburb",
+          name: "suburb",
+          list: "suburb-options",
+          placeholder: "Which suburb?",
+          maxLength: 80,
+        }),
+        e(FormField, {
+          className: "question-block",
           label: "What you ate",
           name: "dish",
+          list: "dish-options",
           placeholder: "Dish, drink, dessert...",
           maxLength: 120,
           required: true,
         }),
-        e(
-          "label",
-          { className: "question-block" },
-          "Cuisine",
-          e(
-            "select",
-            { name: "cuisine" },
-            e("option", { value: "" }, "Select cuisine"),
-            e("option", { value: "Indian" }, "Indian"),
-            e("option", { value: "Lebanese" }, "Lebanese"),
-            e("option", { value: "Pub" }, "Pub"),
-            e("option", { value: "Cafe" }, "Cafe"),
-            e("option", { value: "Chinese" }, "Chinese"),
-            e("option", { value: "Thai" }, "Thai"),
-            e("option", { value: "Italian" }, "Italian"),
-            e("option", { value: "Japanese" }, "Japanese"),
-            e("option", { value: "Mexican" }, "Mexican"),
-            e("option", { value: "Korean" }, "Korean"),
-            e("option", { value: "Mediterranean" }, "Mediterranean"),
-            e("option", { value: "Greek" }, "Greek"),
-          ),
-        ),
+        e(FormField, {
+          className: "question-block",
+          label: "Cuisine",
+          name: "cuisine",
+          list: "cuisine-options",
+          placeholder: "Start typing or choose one...",
+          maxLength: 80,
+        }),
         e(FormField, {
           className: "question-block",
           label: "Price",
@@ -1171,6 +1194,14 @@ function FormField({ label, className = "", ...props }) {
   );
 }
 
+function Datalist({ id, options }) {
+  return e(
+    "datalist",
+    { id },
+    options.map((option) => e("option", { key: option, value: option })),
+  );
+}
+
 function normalizedRating(value) {
   const text = String(value || "").trim();
   if (!text) {
@@ -1208,6 +1239,8 @@ function buildStats(entries) {
   const dishCount = entries.length;
   const restaurantCounts = new Map();
   const restaurantLabels = new Map();
+  const suburbCounts = new Map();
+  const suburbLabels = new Map();
   const cuisineCounts = new Map();
   const cuisineLabels = new Map();
   const cuisineSpend = new Map();
@@ -1234,6 +1267,13 @@ function buildStats(entries) {
     if (restaurantKey) {
       restaurantLabels.set(restaurantKey, restaurantLabels.get(restaurantKey) || restaurantLabel);
       incrementCount(restaurantCounts, restaurantKey);
+    }
+
+    const suburbLabel = String(entry.suburb || "").trim();
+    const suburbKey = suburbLabel.toLowerCase();
+    if (suburbKey) {
+      suburbLabels.set(suburbKey, suburbLabels.get(suburbKey) || suburbLabel);
+      incrementCount(suburbCounts, suburbKey);
     }
 
     const cuisineLabel = String(entry.cuisine || "").trim();
@@ -1293,6 +1333,7 @@ function buildStats(entries) {
   const averageRating = dishCount ? ratingTotal / dishCount : 0;
   const buyAgainRate = dishCount ? buyAgainCount / dishCount : 0;
   const restaurantBreakdown = rankedCounts(restaurantCounts, restaurantLabels);
+  const suburbBreakdown = rankedCounts(suburbCounts, suburbLabels);
   const cuisineBreakdown = rankedCounts(cuisineCounts, cuisineLabels);
   const spendByCuisine = rankedMoney(cuisineSpend, cuisineLabels);
   const repeatRestaurantCount = restaurantBreakdown.filter((item) => item.count > 1).length;
@@ -1300,6 +1341,7 @@ function buildStats(entries) {
   return {
     dishCount,
     restaurantCount: restaurantCounts.size,
+    uniqueSuburbs: suburbCounts.size,
     uniqueCuisines: cuisineCounts.size,
     pricedCount,
     totalSpent,
@@ -1311,11 +1353,13 @@ function buildStats(entries) {
     lowRatedCount,
     topCuisine: cuisineBreakdown[0] || null,
     topRestaurant: restaurantBreakdown[0] || null,
+    topSuburb: suburbBreakdown[0] || null,
     bestEntry,
     spendiestEntry,
     bestValueEntry,
     cuisineBreakdown: cuisineBreakdown.slice(0, 6),
     restaurantBreakdown: restaurantBreakdown.slice(0, 6),
+    suburbBreakdown: suburbBreakdown.slice(0, 6),
     spendByCuisine: spendByCuisine.slice(0, 6),
     ratingBuckets,
     moodLabel: foodMood(averageRating, buyAgainRate),
@@ -1362,6 +1406,36 @@ function foodMood(averageRating, buyAgainRate) {
     return "Picky era";
   }
   return "Still exploring";
+}
+
+function buildSuggestionLists(entries) {
+  return {
+    restaurants: uniqueOptions(entries.map((entry) => entry.restaurant)),
+    suburbs: uniqueOptions(entries.map((entry) => entry.suburb)),
+    dishes: uniqueOptions(entries.map((entry) => entry.dish)),
+    cuisines: uniqueOptions([
+      ...COMMON_CUISINES,
+      ...entries.map((entry) => entry.cuisine),
+    ]),
+  };
+}
+
+function uniqueOptions(values) {
+  const seen = new Set();
+  return values
+    .map((value) => String(value || "").trim())
+    .filter((value) => {
+      if (!value) {
+        return false;
+      }
+      const key = value.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .sort((first, second) => first.localeCompare(second));
 }
 
 function verificationDeliveryText(email, deliveryMode) {

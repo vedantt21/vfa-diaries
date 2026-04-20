@@ -1,6 +1,6 @@
 # VFA Diaries
 
-A simple food diary for saving restaurants, cuisine, what you ate, typed ratings out of 10, comments, and whether you would buy again. No macros.
+A simple food diary for saving restaurants, suburbs, cuisine, what you ate, typed ratings out of 10, comments, and whether you would buy again. No macros.
 
 ## Requirements
 
