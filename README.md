@@ -6,8 +6,11 @@ A simple food diary for saving restaurants, suburbs, cuisine, what you ate, type
 
 - Python 3.10 or newer
 - Python packages from `requirements.txt`
+- Node.js 20 or newer for `npm run build` and `npm test`
 
 The app uses Python's built-in web server tools, SQLite for local development, optional Neon/Postgres for production, and vendored React files in `vendor/`. The default local database file is `vfa_diaries.sqlite3`, and each user signs in with their own verified email and password.
+
+The frontend source lives in `app.tsx`. Run `npm run build` to compile it into `app.js`, which is what `index.html` serves in the browser.
 
 After signing in, use the `Diary` tab to browse saved entries and the `Add food` tab to add a new restaurant note.
 
@@ -17,6 +20,8 @@ From this folder:
 
 ```bash
 pip install -r requirements.txt
+npm install
+npm run build
 python3 server.py
 ```
 
@@ -31,6 +36,14 @@ http://127.0.0.1:8000
 ```
 
 Keep the terminal open while using the app. Stop the server with `Ctrl+C`.
+
+## Tests
+
+Build the frontend TypeScript and run the integration tests with:
+
+```bash
+npm test
+```
 
 ## If Port 8000 Is Busy
 

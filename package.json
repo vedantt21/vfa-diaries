@@ -1,0 +1,12 @@
+{
+  "name": "food-diary",
+  "private": true,
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "pretest": "npm run build",
+    "test": "python3 -m unittest discover -s test -p 'test_*.py' -v"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
