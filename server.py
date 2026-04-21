@@ -17,7 +17,7 @@ from email.parser import BytesParser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 
 ROOT = Path(__file__).resolve().parent
@@ -192,6 +192,17 @@ def init_sqlite_db() -> None:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS follows (
+                follower_id INTEGER NOT NULL,
+                following_id INTEGER NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('pending', 'accepted')),
+                created_at TEXT NOT NULL,
+                responded_at TEXT,
+                PRIMARY KEY (follower_id, following_id),
+                FOREIGN KEY (follower_id) REFERENCES users (id) ON DELETE CASCADE,
+                FOREIGN KEY (following_id) REFERENCES users (id) ON DELETE CASCADE
+            );
             """
         )
         migrate_users_display_name_not_unique(conn)
@@ -199,6 +210,7 @@ def init_sqlite_db() -> None:
         ensure_column(conn, "entries", "suburb", "TEXT")
         ensure_column(conn, "entries", "cuisine", "TEXT")
         ensure_column(conn, "entries", "price", "REAL")
+        ensure_column(conn, "entries", "visibility", "TEXT NOT NULL DEFAULT 'private'")
         ensure_column(conn, "users", "username", "TEXT")
         ensure_column(conn, "users", "email", "TEXT")
         ensure_column(conn, "users", "email_verified", "INTEGER NOT NULL DEFAULT 0")
@@ -276,6 +288,18 @@ def init_postgres_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS follows (
+                follower_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+                following_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+                status TEXT NOT NULL CHECK (status IN ('pending', 'accepted')),
+                created_at TEXT NOT NULL,
+                responded_at TEXT,
+                PRIMARY KEY (follower_id, following_id)
+            )
+            """
+        )
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT")
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT")
         conn.execute(
@@ -289,6 +313,7 @@ def init_postgres_db() -> None:
         conn.execute("ALTER TABLE entries ADD COLUMN IF NOT EXISTS suburb TEXT")
         conn.execute("ALTER TABLE entries ADD COLUMN IF NOT EXISTS cuisine TEXT")
         conn.execute("ALTER TABLE entries ADD COLUMN IF NOT EXISTS price REAL")
+        conn.execute("ALTER TABLE entries ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'private'")
         for row in conn.execute("SELECT id, display_name FROM users WHERE email IS NULL"):
             possible_email = row["display_name"].strip().lower()
             if EMAIL_PATTERN.match(possible_email):
@@ -569,9 +594,10 @@ def insert_entry(conn, params: tuple) -> int:
             comments,
             would_buy_again,
             price,
+            visibility,
             created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     if database_url():
         row = conn.execute(f"{sql} RETURNING id", params).fetchone()
@@ -618,6 +644,101 @@ def send_verification_email(email: str, code: str) -> str:
     return "email"
 
 
+def row_value(row, key: str, default=None):
+    try:
+        value = row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return default if value is None else value
+
+
+def social_counts(conn, user_id: int) -> dict[str, int]:
+    followers = conn.execute(
+        "SELECT COUNT(*) AS count FROM follows WHERE following_id = ? AND status = 'accepted'",
+        (user_id,),
+    ).fetchone()
+    following = conn.execute(
+        "SELECT COUNT(*) AS count FROM follows WHERE follower_id = ? AND status = 'accepted'",
+        (user_id,),
+    ).fetchone()
+    friends = conn.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM follows f
+        JOIN follows reverse_f
+          ON reverse_f.follower_id = f.following_id
+         AND reverse_f.following_id = f.follower_id
+         AND reverse_f.status = 'accepted'
+        WHERE f.follower_id = ? AND f.status = 'accepted'
+        """,
+        (user_id,),
+    ).fetchone()
+    pending = conn.execute(
+        "SELECT COUNT(*) AS count FROM follows WHERE following_id = ? AND status = 'pending'",
+        (user_id,),
+    ).fetchone()
+    public_entries = conn.execute(
+        "SELECT COUNT(*) AS count FROM entries WHERE user_id = ? AND visibility != 'private'",
+        (user_id,),
+    ).fetchone()
+    return {
+        "followersCount": int(row_value(followers, "count", 0)),
+        "followingCount": int(row_value(following, "count", 0)),
+        "friendsCount": int(row_value(friends, "count", 0)),
+        "pendingCount": int(row_value(pending, "count", 0)),
+        "publicEntriesCount": int(row_value(public_entries, "count", 0)),
+    }
+
+
+def relationship_summary(conn, viewer_id: int, target_id: int) -> dict[str, bool | str | None]:
+    follow = conn.execute(
+        "SELECT status FROM follows WHERE follower_id = ? AND following_id = ?",
+        (viewer_id, target_id),
+    ).fetchone()
+    reverse = conn.execute(
+        "SELECT status FROM follows WHERE follower_id = ? AND following_id = ?",
+        (target_id, viewer_id),
+    ).fetchone()
+    follow_status = row_value(follow, "status")
+    reverse_status = row_value(reverse, "status")
+    follows_you = reverse_status == "accepted"
+    return {
+        "followStatus": follow_status,
+        "followsYou": follows_you,
+        "hasIncomingRequest": reverse_status == "pending",
+        "isFriend": follow_status == "accepted" and follows_you,
+    }
+
+
+def social_user_card(conn, viewer_id: int, row, include_counts: bool = False) -> dict:
+    card = {
+        "id": row["id"],
+        "username": row["username"],
+        "displayName": row["display_name"],
+        "createdAt": row_value(row, "created_at"),
+        "connectedAt": row_value(row, "connected_at"),
+    }
+    card.update(relationship_summary(conn, viewer_id, row["id"]))
+    if include_counts:
+        counts = social_counts(conn, row["id"])
+        card.update(
+            {
+                "followersCount": counts["followersCount"],
+                "followingCount": counts["followingCount"],
+                "friendsCount": counts["friendsCount"],
+                "entriesCount": counts["publicEntriesCount"],
+            }
+        )
+    return card
+
+
+class ApiError(Exception):
+    def __init__(self, message: str, status: HTTPStatus):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+
+
 def public_user(row: sqlite3.Row) -> dict:
     return {
         "id": row["id"],
@@ -642,8 +763,212 @@ def row_to_entry(row: sqlite3.Row) -> dict:
         "comments": row["comments"] or "",
         "wouldBuyAgain": bool(row["would_buy_again"]),
         "price": float(row["price"]) if row["price"] is not None else None,
+        "visibility": row_value(row, "visibility", "private") or "private",
         "createdAt": row["created_at"],
     }
+
+
+def entry_with_user(row) -> dict:
+    return {
+        "id": row["id"],
+        "userId": row["user_id"],
+        "displayName": row["display_name"],
+        "username": row["username"],
+        "restaurant": row["restaurant"],
+        "suburb": row["suburb"] or "",
+        "dish": row["dish"],
+        "cuisine": row["cuisine"] or "",
+        "rating": float(row["rating"]),
+        "comments": row["comments"] or "",
+        "wouldBuyAgain": bool(row["would_buy_again"]),
+        "price": float(row["price"]) if row["price"] is not None else None,
+        "visibility": row["visibility"],
+        "createdAt": row["created_at"],
+    }
+
+
+def social_feed_entries(conn, user_id: int, limit: int = 50) -> list[dict]:
+    following_ids = conn.execute(
+        "SELECT following_id FROM follows WHERE follower_id = ? AND status = 'accepted'",
+        (user_id,),
+    ).fetchall()
+    if not following_ids:
+        return []
+
+    placeholders = ",".join("?" * len(following_ids))
+    following_user_ids = [row["following_id"] for row in following_ids]
+    entries = conn.execute(
+        f"""SELECT e.id, e.user_id, u.display_name, u.username, e.restaurant, e.suburb, e.dish,
+                  e.cuisine, e.rating, e.comments, e.would_buy_again, e.price, e.created_at, e.visibility
+           FROM entries e
+           JOIN users u ON u.id = e.user_id
+           WHERE e.user_id IN ({placeholders})
+           AND e.visibility IN ('public', 'friends_only')
+           ORDER BY e.created_at DESC
+           LIMIT {int(limit)}""",
+        following_user_ids,
+    ).fetchall()
+    return [entry_with_user(row) for row in entries]
+
+
+def social_follow_list(conn, user_id: int, list_type: str) -> tuple[list[dict], dict]:
+    counts = social_counts(conn, user_id)
+    if list_type == "pending":
+        follows = conn.execute(
+            """SELECT u.id, u.username, u.display_name, f.created_at AS connected_at
+               FROM follows f
+               JOIN users u ON u.id = f.follower_id
+               WHERE f.following_id = ? AND f.status = 'pending'
+               ORDER BY f.created_at DESC""",
+            (user_id,),
+        ).fetchall()
+    elif list_type in {"accepted", "followers"}:
+        follows = conn.execute(
+            """SELECT u.id, u.username, u.display_name, f.created_at AS connected_at
+               FROM follows f
+               JOIN users u ON u.id = f.follower_id
+               WHERE f.following_id = ? AND f.status = 'accepted'
+               ORDER BY f.created_at DESC""",
+            (user_id,),
+        ).fetchall()
+    elif list_type == "following":
+        follows = conn.execute(
+            """SELECT u.id, u.username, u.display_name,
+                      COALESCE(f.responded_at, f.created_at) AS connected_at
+               FROM follows f
+               JOIN users u ON u.id = f.following_id
+               WHERE f.follower_id = ? AND f.status = 'accepted'
+               ORDER BY COALESCE(f.responded_at, f.created_at) DESC""",
+            (user_id,),
+        ).fetchall()
+    elif list_type == "friends":
+        follows = conn.execute(
+            """SELECT u.id, u.username, u.display_name,
+                      COALESCE(f.responded_at, f.created_at) AS connected_at
+               FROM follows f
+               JOIN users u ON u.id = f.following_id
+               JOIN follows reverse_f
+                 ON reverse_f.follower_id = f.following_id
+                AND reverse_f.following_id = f.follower_id
+                AND reverse_f.status = 'accepted'
+               WHERE f.follower_id = ? AND f.status = 'accepted'
+               ORDER BY COALESCE(f.responded_at, f.created_at) DESC""",
+            (user_id,),
+        ).fetchall()
+    else:
+        raise ValueError("Invalid type.")
+
+    return [social_user_card(conn, user_id, row) for row in follows], counts
+
+
+def apply_follow_action(conn, user_id: int, target_id: int, action: str) -> dict:
+    if target_id == user_id:
+        raise ApiError("Cannot follow yourself.", HTTPStatus.BAD_REQUEST)
+
+    if action == "follow":
+        existing = conn.execute(
+            "SELECT status FROM follows WHERE follower_id = ? AND following_id = ?",
+            (user_id, target_id),
+        ).fetchone()
+
+        if existing:
+            if existing["status"] == "pending":
+                raise ApiError("Follow request already pending.", HTTPStatus.CONFLICT)
+            raise ApiError("Already following.", HTTPStatus.CONFLICT)
+
+        reverse = conn.execute(
+            "SELECT status FROM follows WHERE follower_id = ? AND following_id = ?",
+            (target_id, user_id),
+        ).fetchone()
+        created_at = now_iso()
+
+        if row_value(reverse, "status") == "pending":
+            conn.execute(
+                """UPDATE follows SET status = 'accepted', responded_at = ?
+                   WHERE follower_id = ? AND following_id = ?""",
+                (created_at, target_id, user_id),
+            )
+            conn.execute(
+                """INSERT INTO follows (follower_id, following_id, status, created_at, responded_at)
+                   VALUES (?, ?, 'accepted', ?, ?)""",
+                (user_id, target_id, created_at, created_at),
+            )
+            return {"ok": True, "status": "accepted", "isFriend": True}
+
+        if row_value(reverse, "status") == "accepted":
+            conn.execute(
+                """INSERT INTO follows (follower_id, following_id, status, created_at, responded_at)
+                   VALUES (?, ?, 'accepted', ?, ?)""",
+                (user_id, target_id, created_at, created_at),
+            )
+            return {"ok": True, "status": "accepted", "isFriend": True}
+
+        conn.execute(
+            """INSERT INTO follows (follower_id, following_id, status, created_at)
+               VALUES (?, ?, 'pending', ?)""",
+            (user_id, target_id, created_at),
+        )
+        return {"ok": True, "status": "pending", "isFriend": False}
+
+    if action == "accept":
+        follow = conn.execute(
+            "SELECT status FROM follows WHERE follower_id = ? AND following_id = ? AND status = 'pending'",
+            (target_id, user_id),
+        ).fetchone()
+        if follow is None:
+            raise ApiError("No pending request.", HTTPStatus.NOT_FOUND)
+
+        conn.execute(
+            """UPDATE follows SET status = 'accepted', responded_at = ?
+               WHERE follower_id = ? AND following_id = ?""",
+            (now_iso(), target_id, user_id),
+        )
+        relationship = relationship_summary(conn, user_id, target_id)
+        return {"ok": True, "status": "accepted", "isFriend": relationship["isFriend"]}
+
+    if action == "reject":
+        follow = conn.execute(
+            "SELECT status FROM follows WHERE follower_id = ? AND following_id = ? AND status = 'pending'",
+            (target_id, user_id),
+        ).fetchone()
+        if follow is None:
+            raise ApiError("No pending request.", HTTPStatus.NOT_FOUND)
+
+        conn.execute(
+            "DELETE FROM follows WHERE follower_id = ? AND following_id = ?",
+            (target_id, user_id),
+        )
+        return {"ok": True}
+
+    if action == "unfollow":
+        existing = conn.execute(
+            "SELECT status FROM follows WHERE follower_id = ? AND following_id = ?",
+            (user_id, target_id),
+        ).fetchone()
+        if existing is None:
+            raise ApiError("You are not following this user.", HTTPStatus.NOT_FOUND)
+
+        conn.execute(
+            "DELETE FROM follows WHERE follower_id = ? AND following_id = ?",
+            (user_id, target_id),
+        )
+        return {"ok": True, "status": None, "isFriend": False}
+
+    if action == "remove":
+        existing = conn.execute(
+            "SELECT status FROM follows WHERE follower_id = ? AND following_id = ?",
+            (target_id, user_id),
+        ).fetchone()
+        if existing is None:
+            raise ApiError("This user is not following you.", HTTPStatus.NOT_FOUND)
+
+        conn.execute(
+            "DELETE FROM follows WHERE follower_id = ? AND following_id = ?",
+            (target_id, user_id),
+        )
+        return {"ok": True}
+
+    raise ApiError("Invalid action.", HTTPStatus.BAD_REQUEST)
 
 
 class VfaHandler(BaseHTTPRequestHandler):
@@ -660,6 +985,18 @@ class VfaHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/entries":
             self.list_entries(parsed.query)
+            return
+        if parsed.path.startswith("/api/users/"):
+            self.get_user_profile(parsed.path)
+            return
+        if parsed.path == "/api/users":
+            self.search_users(parsed.query)
+            return
+        if parsed.path == "/api/feed":
+            self.get_friend_feed()
+            return
+        if parsed.path == "/api/follows":
+            self.list_follows(parsed.query)
             return
 
         self.serve_static(parsed.path)
@@ -684,6 +1021,9 @@ class VfaHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/entries":
             self.save_entry()
             return
+        if parsed.path.startswith("/api/follows/"):
+            self.manage_follow(parsed.path)
+            return
 
         self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -700,7 +1040,12 @@ class VfaHandler(BaseHTTPRequestHandler):
         if user is None:
             return
 
-        self.send_json({"user": public_user(user)})
+        with db() as conn:
+            counts = social_counts(conn, user["id"])
+
+        payload = public_user(user)
+        payload.update(counts)
+        self.send_json({"user": payload})
 
     def list_entries(self, query: str) -> None:
         user = self.require_user()
@@ -720,6 +1065,7 @@ class VfaHandler(BaseHTTPRequestHandler):
                 entries.comments,
                 entries.would_buy_again,
                 entries.price,
+                entries.visibility,
                 entries.created_at
             FROM entries
             JOIN users ON users.id = entries.user_id
@@ -1073,6 +1419,9 @@ class VfaHandler(BaseHTTPRequestHandler):
             would_buy_again = self.form_value(form, "wouldBuyAgain") == "true"
             price_str = self.form_value(form, "price").strip()
             price = float(price_str) if price_str else None
+            visibility = self.form_value(form, "visibility").strip() or "private"
+            if visibility not in ("private", "friends_only", "public"):
+                visibility = "private"
         except ValueError as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
@@ -1097,6 +1446,7 @@ class VfaHandler(BaseHTTPRequestHandler):
                     comments,
                     int(would_buy_again),
                     price,
+                    visibility,
                     now_iso(),
                 ),
             )
@@ -1114,6 +1464,7 @@ class VfaHandler(BaseHTTPRequestHandler):
                     entries.comments,
                     entries.would_buy_again,
                     entries.price,
+                    entries.visibility,
                     entries.created_at
                 FROM entries
                 JOIN users ON users.id = entries.user_id
@@ -1146,6 +1497,133 @@ class VfaHandler(BaseHTTPRequestHandler):
             conn.execute("DELETE FROM entries WHERE id = ? AND user_id = ?", (entry_id, user["id"]))
 
         self.send_json({"ok": True})
+
+    def get_user_profile(self, path: str) -> None:
+        """Get a user's public profile with social stats."""
+        username = path.removeprefix("/api/users/").rstrip("/")
+        if not username:
+            self.send_json({"error": "Username is required."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        current_user = self.require_user()
+        if current_user is None:
+            return
+
+        with db() as conn:
+            user = conn.execute(
+                "SELECT id, display_name, username, created_at FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+            if user is None:
+                self.send_json({"error": "User not found."}, HTTPStatus.NOT_FOUND)
+                return
+
+            counts = social_counts(conn, user["id"])
+            relationship = relationship_summary(conn, current_user["id"], user["id"])
+
+        self.send_json(
+            {
+                "username": user["username"],
+                "displayName": user["display_name"],
+                "followers": counts["followersCount"],
+                "following": counts["followingCount"],
+                "friends": counts["friendsCount"],
+                "entries": counts["publicEntriesCount"],
+                "followStatus": relationship["followStatus"],
+                "followsYou": relationship["followsYou"],
+                "isFriend": relationship["isFriend"],
+                "createdAt": user["created_at"],
+            }
+        )
+
+    def search_users(self, query_string: str) -> None:
+        """Search for users to follow."""
+        user = self.require_user()
+        if user is None:
+            return
+
+        params = parse_qs(query_string)
+        search_term = (params.get("q", [""])[0] or "").strip().lower()[:50]
+
+        if not search_term or len(search_term) < 2:
+            self.send_json({"error": "Search term too short."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        with db() as conn:
+            users = conn.execute(
+                """SELECT id, username, display_name, created_at FROM users
+                   WHERE (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?)
+                   AND id != ? 
+                   LIMIT 20""",
+                (f"%{search_term}%", f"%{search_term}%", user["id"]),
+            ).fetchall()
+
+            results = [social_user_card(conn, user["id"], u, include_counts=True) for u in users]
+
+        self.send_json({"users": results})
+
+    def get_friend_feed(self) -> None:
+        """Get recent entries from accepted followers."""
+        user = self.require_user()
+        if user is None:
+            return
+
+        with db() as conn:
+            entries = social_feed_entries(conn, user["id"])
+
+        self.send_json({"entries": entries})
+
+    def list_follows(self, query_string: str) -> None:
+        """List social relationships for the current user."""
+        user = self.require_user()
+        if user is None:
+            return
+
+        params = parse_qs(query_string)
+        list_type = params.get("type", ["pending"])[0]
+
+        with db() as conn:
+            try:
+                items, counts = social_follow_list(conn, user["id"], list_type)
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+
+        self.send_json({"follows": items, "counts": counts})
+
+    def manage_follow(self, path: str) -> None:
+        """Handle follow/accept/reject actions."""
+        user = self.require_user()
+        if user is None:
+            return
+
+        # Path format: /api/follows/{username}/{action}
+        parts = path.removeprefix("/api/follows/").rstrip("/").split("/")
+        if len(parts) < 1:
+            self.send_json({"error": "Invalid path."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        target_username = parts[0]
+        action = parts[1] if len(parts) > 1 else "follow"
+
+        with db() as conn:
+            target_user = conn.execute(
+                "SELECT id FROM users WHERE username = ?",
+                (target_username,),
+            ).fetchone()
+
+            if target_user is None:
+                self.send_json({"error": "User not found."}, HTTPStatus.NOT_FOUND)
+                return
+
+            target_id = target_user["id"]
+            try:
+                payload = apply_follow_action(conn, user["id"], target_id, action)
+            except ApiError as exc:
+                self.send_json({"error": exc.message}, exc.status)
+                return
+
+        self.send_json(payload)
 
     def read_multipart_form(self, content_type: str) -> FormData:
         content_length = self.clean_int(self.headers.get("Content-Length", "0"))
